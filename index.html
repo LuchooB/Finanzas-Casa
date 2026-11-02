@@ -235,6 +235,22 @@ table.lista { width: 100%; border-collapse: collapse; font-size: 15px; }
 .lista td + td, .lista th + th { padding-left: 10px; white-space: nowrap; }
 .lista td { padding: 8px 0; border-top: 1px solid var(--renglon); text-align: right; }
 .nota { margin: 12px 0 0; font-size: 13px; color: var(--tinta-2); }
+.lista tr.incluido td { opacity: .45; }
+.dos + table { margin-top: 18px; }
+.ahorros { list-style: none; margin: 0; padding: 0; }
+.ahorros li {
+  display: grid; grid-template-columns: 1fr 160px 28px; gap: 8px; align-items: center;
+  padding: 7px 0; border-bottom: 1px dashed var(--renglon);
+}
+.ahorros .nombre {
+  min-width: 0; height: 44px; padding: 0; border: 0; background: transparent; outline: none;
+  font-size: 17px; font-weight: 500;
+}
+.ahorros .nombre::placeholder { color: var(--tinta-2); opacity: .6; }
+.moneda {
+  flex: none; height: 30px; min-width: 40px; padding: 0 6px; border: 1px solid var(--renglon); border-radius: 8px;
+  background: var(--papel); font-size: 13px; font-weight: 700; color: var(--tinta-2);
+}
 
 /* Historial */
 .hist {
@@ -253,7 +269,7 @@ table.lista { width: 100%; border-collapse: collapse; font-size: 15px; }
 /* Ajustes */
 .campo { display: block; margin-bottom: 12px; }
 .campo > span { display: block; margin-bottom: 4px; font-size: 14px; color: var(--tinta-2); }
-.campo input[type=text], .campo input[type=url], .campo input:not([type]) {
+.campo input[type=text], .campo input[type=url], .campo input[type=email], .campo input:not([type]) {
   width: 100%; height: 46px; padding: 0 12px; border: 1px solid var(--renglon); border-radius: 10px;
   background: var(--campo); font-size: 17px; outline: none;
 }
@@ -303,7 +319,7 @@ table.lista { width: 100%; border-collapse: collapse; font-size: 15px; }
 
 <script>
 'use strict';
-const VERSION = '1.0';
+const VERSION = '1.2';
 
 /* ---------- Almacenamiento local ---------- */
 const LS = { cfg: 'fz_cfg', data: 'fz_data', cola: 'fz_cola' };
@@ -312,16 +328,16 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin espacio o modo privado */ } },
 };
 
-const CONFIG_EDITABLE = ['nombre1', 'nombre2', 'meta_nombre', 'meta_monto', 'meta_moneda'];
+const CONFIG_EDITABLE = ['nombre1', 'nombre2', 'meta_nombre', 'meta_monto', 'meta_moneda', 'mail1', 'mail2'];
 function vacio() {
   return {
-    config: { nombre1: 'Persona 1', nombre2: 'Persona 2', meta_nombre: '', meta_monto: '0', meta_moneda: 'USD' },
+    config: { nombre1: 'Persona 1', nombre2: 'Persona 2', meta_nombre: '', meta_monto: '0', meta_moneda: 'USD', mail1: '', mail2: '' },
     conceptos: [
       { concepto: 'Alquiler', repite: true }, { concepto: 'Expensas', repite: false },
       { concepto: 'Luz', repite: false }, { concepto: 'Gas', repite: false },
       { concepto: 'Agua', repite: false }, { concepto: 'Internet', repite: true },
     ],
-    meses: [], gastos: [],
+    meses: [], gastos: [], ahorros: [],
   };
 }
 function normalizar(d) {
@@ -332,6 +348,7 @@ function normalizar(d) {
     conceptos: Array.isArray(d.conceptos) ? d.conceptos : base.conceptos,
     meses: Array.isArray(d.meses) ? d.meses : [],
     gastos: Array.isArray(d.gastos) ? d.gastos : [],
+    ahorros: Array.isArray(d.ahorros) ? d.ahorros : (d.meses ? null : []),
   };
 }
 
@@ -384,11 +401,17 @@ function iniciales() {
 }
 const getMes = m => data.meses.find(x => x.mes === m) || null;
 const gastosDe = m => data.gastos.filter(g => g.mes === m);
+// Orden alfabético (A a Z); los que todavía no tienen nombre van al final.
+function cmpTxt(a, b) {
+  const x = String(a == null ? '' : a).trim(), y = String(b == null ? '' : b).trim();
+  if (!x && y) return 1;
+  if (x && !y) return -1;
+  return x.localeCompare(y, 'es', { sensitivity: 'base', numeric: true });
+}
 function gastosOrdenados(m) {
-  const orden = data.conceptos.map(c => c.concepto.toLowerCase());
-  const gs = gastosDe(m).map((g, i) => ({ g, i }));
-  const pos = g => { const k = orden.indexOf(String(g.concepto).toLowerCase()); return k === -1 ? 999 : k; };
-  return gs.sort((a, b) => (pos(a.g) - pos(b.g)) || (a.i - b.i)).map(x => x.g);
+  return gastosDe(m).map((g, i) => ({ g, i }))
+    .sort((a, b) => cmpTxt(a.g.concepto, b.g.concepto) || (a.i - b.i))
+    .map(x => x.g);
 }
 function mesAnteriorCargado(m) {
   return data.meses.map(x => x.mes).filter(x => x < m).sort().pop() || null;
@@ -409,7 +432,7 @@ function calc(m) {
     l1: s1 - t1 - a1, l2: s2 - t2 - a2,
     pag1, pag2, sinMarcar: total - pag1 - pag2,
     dif: pag1 - (pag1 + pag2) * p1,           // >0: la persona 2 le debe a la 1
-    faltan: gs.filter(g => g.monto === null || g.monto === undefined).map(g => g.concepto || 'sin nombre'),
+    faltan: gastosOrdenados(m).filter(g => g.monto === null || g.monto === undefined).map(g => g.concepto || 'sin nombre'),
     dolar: r.dolar || null, haySueldos: S > 0,
   };
 }
@@ -433,6 +456,13 @@ function aplicarLocal(op) {
       data.meses = data.meses.filter(x => x.mes !== op.mes);
       break;
     case 'conceptos': data.conceptos = op.d.map(c => Object.assign({}, c)); break;
+    case 'ahorro': {
+      if (!data.ahorros) data.ahorros = [];
+      const i = data.ahorros.findIndex(x => x.id === op.d.id);
+      if (i < 0) data.ahorros.push(Object.assign({}, op.d)); else data.ahorros[i] = Object.assign({}, data.ahorros[i], op.d);
+      break;
+    }
+    case 'delAhorro': data.ahorros = (data.ahorros || []).filter(a => a.id !== op.id); break;
     case 'config': data.config = Object.assign({}, data.config, op.d); break;
   }
 }
@@ -442,6 +472,8 @@ function claveOp(op) {
     case 'gasto': return 'g:' + op.d.id;
     case 'delGasto': return 'dg:' + op.id;
     case 'delMes': return 'dm:' + op.mes;
+    case 'ahorro': return 'a:' + op.d.id;
+    case 'delAhorro': return 'da:' + op.id;
     default: return op.t;
   }
 }
@@ -486,7 +518,7 @@ async function sync() {
 async function api(ops) {
   let r;
   try {
-    r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ token: cfg.token, autor: nombre(cfg.yo), ops }) });
+    r = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ token: cfg.token, autor: nombre(cfg.yo), yo: cfg.yo, url: location.origin + location.pathname, ops }) });
   } catch (e) { throw new Error('Sin conexión con la planilla.'); }
   let j;
   try { j = await r.json(); } catch (e) {
@@ -579,7 +611,7 @@ function vistaMes() {
   <section class="bloque">
     <h2>Gastos <span class="total" id="totalGastos">${plata(c.total)}</span></h2>
     <ul class="gastos">${filas}</ul>
-    <p class="leyenda-pago">Tocá ${esc(i1)} o ${esc(i2)} para marcar quién pagó cada gasto.</p>
+    <p class="leyenda-pago">Tocá ${esc(i1)} o ${esc(i2)} para marcar quién pagó cada gasto. Los gastos que agregues quedan también para los meses siguientes.</p>
     <button class="agregar" data-act="addGasto">Agregar gasto</button>
   </section>
   <section class="bloque" id="resumen">${htmlResumen(c)}</section>
@@ -657,52 +689,96 @@ function vistaMesVacio(m) {
   </section>`;
 }
 
+function dolarRef() {
+  const ms = data.meses.filter(r => r.dolar).sort((a, b) => (a.mes < b.mes ? 1 : -1));
+  return ms.length ? ms[0].dolar : null;
+}
+
 function vistaAhorro() {
+  const ref = dolarRef();
+  const scriptViejo = data.ahorros === null;
+  const items = (data.ahorros || []).slice().sort((a, b) => cmpTxt(a.nombre, b.nombre));
+  const conMonto = items.filter(a => a.monto);
+  // Mes en que se actualizaron por última vez los valores: el ahorro mensual de antes ya está adentro.
+  const corte = conMonto.map(a => a.mes).filter(Boolean).sort().pop() || null;
+  const prevUsd = conMonto.filter(a => a.moneda !== 'ARS').reduce((s, a) => s + a.monto, 0);
+  const prevArs = conMonto.filter(a => a.moneda === 'ARS').reduce((s, a) => s + a.monto, 0);
+
   const meses = data.meses.slice().sort((a, b) => (a.mes < b.mes ? 1 : -1));
-  let t1 = 0, t2 = 0, tu = 0, conDolar = 0, sinDolar = 0;
+  let t1 = 0, t2 = 0, sumaArs = 0, sumaUsd = 0, hayIncluidos = false;
   const filas = meses.map(r => {
-    const c = calc(r.mes);
+    const c = calc(r.mes), tot = c.a1 + c.a2, d = r.dolar || ref;
     t1 += c.a1; t2 += c.a2;
-    const tot = c.a1 + c.a2;
-    if (r.dolar) { tu += tot / r.dolar; conDolar++; } else if (tot > 0) sinDolar++;
-    return `<tr><td>${nombreMes(r.mes, 'corto')}</td><td>${plata(c.a1)}</td><td>${plata(c.a2)}</td><td>${r.dolar ? dolares(tot / r.dolar) : '—'}</td></tr>`;
+    const suma = !corte || r.mes >= corte;
+    if (suma) { sumaArs += tot; if (d) sumaUsd += tot / d; } else hayIncluidos = true;
+    return `<tr${suma ? '' : ' class="incluido"'}><td>${nombreMes(r.mes, 'corto')}</td><td>${plata(c.a1)}</td><td>${plata(c.a2)}</td><td>${d ? dolares(tot / d) : '—'}</td></tr>`;
   }).join('');
-  if (!meses.length) {
-    return avisoConexion() + `<section class="vacio"><h2>Todavía no hay ahorro</h2><p>Cargá el primer mes con los sueldos y el % que ahorra cada uno.</p><button class="primario" data-tab="mes">Ir al mes</button></section>`;
-  }
+
+  const pesos = prevArs + sumaArs;
+  const totalUsd = ref ? prevUsd + pesos / ref : null;
+  const totalArs = ref ? pesos + prevUsd * ref : null;
+
+  let grande, sub;
+  if (ref) { grande = dolares(totalUsd); sub = `Aprox. ${plata(totalArs)} con el dólar a ${plata(ref)}`; }
+  else if (prevUsd > 0) { grande = dolares(prevUsd); sub = pesos > 0 ? `Más ${plata(pesos)} en pesos. Cargá el dólar del mes para verlo todo junto.` : ''; }
+  else { grande = plata(pesos); sub = pesos > 0 ? 'Cargá el dólar del mes para verlo también en dólares.' : 'Todavía no hay ahorro cargado.'; }
+
   const metaMonto = leerNum(data.config.meta_monto) || 0;
   const enUsd = data.config.meta_moneda !== 'ARS';
   let meta = `<section class="bloque"><h2>Meta</h2><p class="ayuda">Poné una meta en Ajustes (por ejemplo, el auto) y acá ves cuánto falta.</p></section>`;
   if (metaMonto > 0) {
-    const llevan = enUsd ? tu : t1 + t2;
+    const llevan = enUsd ? (ref ? totalUsd : prevUsd) : (ref ? totalArs : pesos);
+    const incompleto = !ref && (enUsd ? pesos > 0 : prevUsd > 0);
     const prog = Math.max(0, Math.min(1, llevan / metaMonto));
     const fm = enUsd ? dolares : plata;
-    const falta = Math.max(0, metaMonto - llevan);
+    const txt = llevan >= metaMonto
+      ? `Llegaron a la meta: ${fm(llevan)} de ${fm(metaMonto)}.`
+      : `${fm(llevan)} de ${fm(metaMonto)}. Faltan ${fm(metaMonto - llevan)}.`;
     meta = `<section class="bloque">
       <h2>${esc(data.config.meta_nombre || 'Meta')} <span class="total">${pct(prog)}</span></h2>
       <div class="meta-barra" role="img" aria-label="${pct(prog)} de la meta"><i style="width:${(prog * 100).toFixed(1)}%"></i></div>
-      <p class="meta-txt">${fm(llevan)} de ${fm(metaMonto)}. Faltan ${fm(falta)}.</p>
-      ${enUsd && sinDolar ? `<p class="nota">${sinDolar} ${sinDolar === 1 ? 'mes no tiene' : 'meses no tienen'} dólar cargado y no ${sinDolar === 1 ? 'suma' : 'suman'} a la meta en dólares.</p>` : ''}
+      <p class="meta-txt">${txt}</p>
+      ${incompleto ? `<p class="nota">No incluye lo que está en ${enUsd ? 'pesos' : 'dólares'}: cargá el dólar del mes para sumarlo.</p>` : ''}
     </section>`;
   }
+
+  const filasA = items.map(a => `
+    <li data-aid="${esc(a.id)}">
+      <input class="nombre" type="text" data-a="nombre" value="${esc(a.nombre)}" placeholder="Ej.: CEDEARs en IOL" aria-label="Qué es">
+      <div class="caja"><button type="button" class="moneda" data-amon="1" aria-label="Cambiar moneda">${a.moneda === 'ARS' ? '$' : 'US$'}</button><input data-a="monto" inputmode="decimal" value="${campo(a.monto)}" placeholder="0" aria-label="Valor de ${esc(a.nombre)}"></div>
+      <button class="x" data-act="delAhorro" aria-label="Borrar ${esc(a.nombre)}">×</button>
+    </li>`).join('');
+  const subtotal = !conMonto.length ? '' : ref ? dolares(prevUsd + prevArs / ref) : (prevArs ? '' : dolares(prevUsd));
+
   return avisoConexion() + `
   <section class="bloque ahorro-total">
-    <p class="lbl">Ahorrado entre los dos</p>
-    <p class="grande">${plata(t1 + t2)}</p>
-    <p class="sub">${conDolar ? 'Aprox. ' + dolares(tu) + ' con el dólar de cada mes' : 'Cargá el dólar del mes para verlo también en dólares'}</p>
+    <p class="lbl">Ahorro total de los dos</p>
+    <p class="grande">${grande}</p>
+    ${sub ? `<p class="sub">${sub}</p>` : ''}
+  </section>
+  ${meta}
+  <section class="bloque">
+    <h2>Lo que ya tenían <span class="total">${subtotal}</span></h2>
+    <p class="ayuda">Dólares, CEDEARs, acciones, plazo fijo. Actualizá los valores cada tanto, porque las inversiones cambian de precio. Tocá US$ o $ para cambiar la moneda.</p>
+    ${scriptViejo
+      ? '<p class="falta">Para cargar esto hay que actualizar el script de la planilla (Code.gs) a la versión nueva.</p>'
+      : `<ul class="ahorros">${filasA}</ul>
+    <button class="agregar" data-act="addAhorro">Agregar</button>`}
+    ${corte ? `<p class="nota">Valores de ${nombreMes(corte)}. Al total se le suma el ahorro mensual desde ${nombreMes(corte, 'solo')} en adelante; lo de antes ya está dentro de estos valores.</p>` : ''}
+  </section>
+  <section class="bloque">
+    <h2>Ahorro de cada mes</h2>
+    ${meses.length ? `
     <div class="dos">
       <div class="p1"><b>${esc(nombre(1))}</b><span>${plata(t1)}</span></div>
       <div class="p2"><b>${esc(nombre(2))}</b><span>${plata(t2)}</span></div>
     </div>
-  </section>
-  ${meta}
-  <section class="bloque">
-    <h2>Mes a mes</h2>
     <table class="lista">
       <thead><tr><th>Mes</th><th>${esc(nombre(1))}</th><th>${esc(nombre(2))}</th><th>US$</th></tr></thead>
       <tbody>${filas}</tbody>
     </table>
-    <p class="nota">Es el ahorro que corresponde según el sueldo y el % de cada mes.</p>
+    <p class="nota">Es lo que corresponde según el sueldo y el % de cada mes.${hayIncluidos ? ' En gris, los meses que ya están dentro de lo que tenían.' : ''}</p>`
+    : '<p class="ayuda">Cuando cargues el primer mes, acá aparece cuánto ahorra cada uno.</p>'}
   </section>`;
 }
 
@@ -748,6 +824,11 @@ function vistaAjustes() {
     <label class="campo"><span>Persona 2</span><input type="text" data-cfg="nombre2" value="${esc(data.config.nombre2)}"></label>
   </section>
   <section class="bloque">
+    <h2>Avisos por mail</h2>
+    <p class="ayuda">Cuando uno de los dos carga algo, al otro le llega un mail con el resumen unos minutos después de que termina.</p>
+    ${[1, 2].map(i => `<label class="campo"><span>Mail de ${esc(nombre(i))}</span><input type="email" data-cfg="mail${i}" value="${esc(data.config['mail' + i] || '')}" placeholder="nombre@gmail.com" autocomplete="off" autocapitalize="off" spellcheck="false"></label>`).join('')}
+  </section>
+  <section class="bloque">
     <h2>Meta de ahorro</h2>
     <label class="campo"><span>Para qué ahorran</span><input type="text" data-cfg="meta_nombre" value="${esc(data.config.meta_nombre)}" placeholder="Auto nuevo"></label>
     <label class="campo"><span>Monto de la meta</span><input type="text" inputmode="decimal" data-cfg="meta_monto" value="${campo(leerNum(data.config.meta_monto))}" placeholder="0"></label>
@@ -787,6 +868,9 @@ vista.addEventListener('input', e => {
     const g = data.gastos.find(x => x.id === t.closest('.gasto').dataset.id); if (!g) return;
     g.monto = leerNum(t.value);
     refrescarVivo();
+  } else if (t.dataset.a === 'monto') {
+    const a = (data.ahorros || []).find(x => x.id === t.closest('li').dataset.aid); if (!a) return;
+    a.monto = leerNum(t.value);
   }
 });
 
@@ -802,8 +886,11 @@ vista.addEventListener('change', e => {
     const g = data.gastos.find(x => x.id === id); if (!g) return;
     const campoG = t.dataset.g;
     const v = campoG === 'monto' ? leerNum(t.value) : t.value.trim();
+    const nombreAnterior = String(g.concepto || '').trim();
     encolar({ t: 'gasto', d: Object.assign({}, g, { [campoG]: v }) });
     if (campoG === 'monto') t.value = campo(v);
+    // Un gasto nuevo queda en la plantilla y en los meses siguientes que ya estén cargados.
+    if (campoG === 'concepto' && v && !nombreAnterior) sumarATodos(v, g.mes);
     refrescarVivo();
   } else if (t.dataset.cfg) {
     const k = t.dataset.cfg;
@@ -819,8 +906,29 @@ vista.addEventListener('change', e => {
     if (!lista[i]) { lista.push({ concepto: '', repite: false }); i = lista.length - 1; }
     if (t.dataset.con === 'repite') lista[i].repite = t.checked; else lista[i].concepto = t.value.trim();
     encolar({ t: 'conceptos', d: lista });
+  } else if (t.dataset.a) {
+    const a = (data.ahorros || []).find(x => x.id === t.closest('li').dataset.aid); if (!a) return;
+    const k = t.dataset.a;
+    const v = k === 'monto' ? leerNum(t.value) : t.value.trim();
+    const d = Object.assign({}, a, { [k]: v });
+    if (k === 'monto') { d.mes = mesActual(); t.value = campo(v); }
+    encolar({ t: 'ahorro', d });
+    renderPronto();
   }
 });
+
+function sumarATodos(concepto, desde) {
+  const k = concepto.toLowerCase();
+  if (!data.conceptos.some(c => String(c.concepto).toLowerCase() === k)) {
+    encolar({ t: 'conceptos', d: data.conceptos.map(c => Object.assign({}, c)).concat([{ concepto, repite: false }]) }, true);
+  }
+  data.meses.filter(r => r.mes > desde).forEach(r => {
+    if (!gastosDe(r.mes).some(g => String(g.concepto).toLowerCase() === k)) {
+      encolar({ t: 'gasto', d: { id: uid(), mes: r.mes, concepto, monto: null, pago: 0, nota: '' } }, true);
+    }
+  });
+  programarSync();
+}
 
 document.addEventListener('click', e => {
   const b = e.target.closest('button');
@@ -832,6 +940,12 @@ document.addEventListener('click', e => {
     const g = data.gastos.find(x => x.id === id); if (!g) return;
     const p = Number(b.dataset.pago);
     encolar({ t: 'gasto', d: Object.assign({}, g, { pago: g.pago === p ? 0 : p }) });
+    render();
+    return;
+  }
+  if (b.dataset.amon) {
+    const a = (data.ahorros || []).find(x => x.id === b.closest('li').dataset.aid); if (!a) return;
+    encolar({ t: 'ahorro', d: Object.assign({}, a, { moneda: a.moneda === 'ARS' ? 'USD' : 'ARS', mes: mesActual() }) });
     render();
     return;
   }
@@ -861,6 +975,22 @@ document.addEventListener('click', e => {
       const g = data.gastos.find(x => x.id === id);
       if (g && g.monto && !confirm(`¿Borrar ${g.concepto || 'este gasto'} (${plata(g.monto)})?`)) return;
       encolar({ t: 'delGasto', id });
+      render();
+      break;
+    }
+    case 'addAhorro': {
+      const id = uid();
+      encolar({ t: 'ahorro', d: { id, nombre: '', moneda: 'USD', monto: null, mes: mesActual() } });
+      render();
+      const el = vista.querySelector(`li[data-aid="${id}"] .nombre`);
+      if (el) el.focus();
+      break;
+    }
+    case 'delAhorro': {
+      const id = b.closest('li').dataset.aid;
+      const a = (data.ahorros || []).find(x => x.id === id);
+      if (a && a.monto && !confirm(`¿Borrar ${a.nombre || 'este ahorro'}?`)) return;
+      encolar({ t: 'delAhorro', id });
       render();
       break;
     }
