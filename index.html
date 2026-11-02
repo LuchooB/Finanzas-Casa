@@ -236,6 +236,17 @@ table.lista { width: 100%; border-collapse: collapse; font-size: 15px; }
 .lista td { padding: 8px 0; border-top: 1px solid var(--renglon); text-align: right; }
 .nota { margin: 12px 0 0; font-size: 13px; color: var(--tinta-2); }
 .lista tr.incluido td { opacity: .45; }
+.iol { margin: 2px 0 14px; padding: 12px 14px 14px; border: 1px solid var(--renglon); border-radius: 12px; background: var(--campo); }
+.iol-cab { display: flex; justify-content: space-between; align-items: baseline; font: 650 18px var(--display); }
+.iol-cab span { font: 700 18px var(--texto); }
+.iol-lista { list-style: none; margin: 8px 0 0; padding: 0; }
+.iol-lista li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px dashed var(--renglon); }
+.iol-lista li div { display: flex; flex-direction: column; min-width: 0; }
+.iol-lista li div span { font-size: 13px; color: var(--tinta-2); }
+.iol-lista .v { font-weight: 600; white-space: nowrap; }
+.iol .nota { margin-top: 10px; }
+.iol .agregar { margin-top: 10px; }
+.iol .agregar[disabled] { opacity: .6; }
 .dos + table { margin-top: 18px; }
 .ahorros { list-style: none; margin: 0; padding: 0; }
 .ahorros li {
@@ -319,7 +330,7 @@ table.lista { width: 100%; border-collapse: collapse; font-size: 15px; }
 
 <script>
 'use strict';
-const VERSION = '1.2';
+const VERSION = '1.3';
 
 /* ---------- Almacenamiento local ---------- */
 const LS = { cfg: 'fz_cfg', data: 'fz_data', cola: 'fz_cola' };
@@ -337,7 +348,7 @@ function vacio() {
       { concepto: 'Luz', repite: false }, { concepto: 'Gas', repite: false },
       { concepto: 'Agua', repite: false }, { concepto: 'Internet', repite: true },
     ],
-    meses: [], gastos: [], ahorros: [],
+    meses: [], gastos: [], ahorros: [], iol: null,
   };
 }
 function normalizar(d) {
@@ -349,13 +360,14 @@ function normalizar(d) {
     meses: Array.isArray(d.meses) ? d.meses : [],
     gastos: Array.isArray(d.gastos) ? d.gastos : [],
     ahorros: Array.isArray(d.ahorros) ? d.ahorros : (d.meses ? null : []),
+    iol: d.iol && typeof d.iol === 'object' ? d.iol : null,
   };
 }
 
 let cfg = Object.assign({ url: '', token: '', yo: 1 }, store.get(LS.cfg, {}));
 let data = normalizar(store.get(LS.data, null));
 let cola = store.get(LS.cola, []);
-const ui = { tab: 'mes', mes: mesActual(), pendienteRender: false, estado: 'idle', error: '', borrador: {} };
+const ui = { tab: 'mes', mes: mesActual(), pendienteRender: false, estado: 'idle', error: '', borrador: {}, iolActualizando: false };
 
 /* ---------- Fechas y números ---------- */
 const NOMBRES_MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -378,6 +390,10 @@ const f0 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 });
 const f2 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 });
 function plata(n) { n = Math.round(n || 0); return (n < 0 ? '−' : '') + '$ ' + f0.format(Math.abs(n)); }
 function dolares(n) { return 'US$ ' + f0.format(Math.round(n || 0)); }
+function dolaresCentavos(n) { return 'US$\u00a0' + new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0); }
+const dos = n => String(n).padStart(2, '0');
+function fechaHora(iso) { const d = new Date(iso); return `${d.getDate()} de ${NOMBRES_MES[d.getMonth()]} a las ${dos(d.getHours())}:${dos(d.getMinutes())}`; }
+function mesDeFecha(iso) { const d = new Date(iso); return d.getFullYear() + '-' + dos(d.getMonth() + 1); }
 function pct(x) { return f0.format(Math.round(x * 100)) + '%'; }
 function campo(n) { return n === null || n === undefined || n === '' ? '' : f2.format(n); }
 function leerNum(s) {
@@ -511,6 +527,7 @@ async function sync() {
     if (ui.tab === 'ajustes') renderPronto();
   } finally {
     enVuelo = false;
+    if (ui.iolActualizando && !cola.some(o => o.t === 'iol')) { ui.iolActualizando = false; renderPronto(); }
     pintarEstado();
     if (cola.length && ui.estado === 'ok') programarSync(300);
   }
@@ -694,14 +711,31 @@ function dolarRef() {
   return ms.length ? ms[0].dolar : null;
 }
 
+function htmlIol() {
+  if (!data.iol) return '';
+  const iol = data.iol, ok = !!iol.fecha;
+  const filas = (iol.activos || []).slice().sort((a, b) => b.usd - a.usd).map(a => `
+      <li><div><b>${esc(a.simbolo)}</b><span>${f2.format(a.cantidad)} ${a.cantidad === 1 ? 'unidad' : 'unidades'} a ${dolaresCentavos(a.precioUsd)}</span></div><span class="v">${dolares(a.usd)}</span></li>`).join('')
+    + (iol.efectivo || []).map(c => `
+      <li><div><b>${c.moneda === 'USD' ? 'Dólares en cuenta' : 'Pesos en cuenta'}</b>${c.moneda === 'ARS' ? `<span>${plata(c.saldo)}</span>` : ''}</div><span class="v">${dolares(c.usd)}</span></li>`).join('');
+  return `<div class="iol">
+    <div class="iol-cab"><b>Cuenta IOL</b><span>${ok ? dolares(iol.totalUsd) : ''}</span></div>
+    ${ok ? `<ul class="iol-lista">${filas}</ul>` : ''}
+    <p class="nota">${ok ? `Actualizado el ${fechaHora(iol.fecha)}, con el dólar MEP a ${plata(iol.mep)}.` : 'Todavía no se pudo traer la cuenta.'}</p>
+    ${iol.error ? `<p class="falta">El último intento falló: ${esc(iol.error)}</p>` : ''}
+    <button class="agregar" data-act="actualizarIOL" ${ui.iolActualizando ? 'disabled' : ''}>${ui.iolActualizando ? 'Actualizando…' : 'Actualizar ahora'}</button>
+  </div>`;
+}
+
 function vistaAhorro() {
-  const ref = dolarRef();
+  const iol = data.iol && data.iol.fecha ? data.iol : null;
+  const ref = (iol && iol.mep) || dolarRef();
   const scriptViejo = data.ahorros === null;
   const items = (data.ahorros || []).slice().sort((a, b) => cmpTxt(a.nombre, b.nombre));
   const conMonto = items.filter(a => a.monto);
   // Mes en que se actualizaron por última vez los valores: el ahorro mensual de antes ya está adentro.
-  const corte = conMonto.map(a => a.mes).filter(Boolean).sort().pop() || null;
-  const prevUsd = conMonto.filter(a => a.moneda !== 'ARS').reduce((s, a) => s + a.monto, 0);
+  const corte = conMonto.map(a => a.mes).concat(iol ? [mesDeFecha(iol.fecha)] : []).filter(Boolean).sort().pop() || null;
+  const prevUsd = conMonto.filter(a => a.moneda !== 'ARS').reduce((s, a) => s + a.monto, 0) + (iol ? Number(iol.totalUsd) || 0 : 0);
   const prevArs = conMonto.filter(a => a.moneda === 'ARS').reduce((s, a) => s + a.monto, 0);
 
   const meses = data.meses.slice().sort((a, b) => (a.mes < b.mes ? 1 : -1));
@@ -748,7 +782,7 @@ function vistaAhorro() {
       <div class="caja"><button type="button" class="moneda" data-amon="1" aria-label="Cambiar moneda">${a.moneda === 'ARS' ? '$' : 'US$'}</button><input data-a="monto" inputmode="decimal" value="${campo(a.monto)}" placeholder="0" aria-label="Valor de ${esc(a.nombre)}"></div>
       <button class="x" data-act="delAhorro" aria-label="Borrar ${esc(a.nombre)}">×</button>
     </li>`).join('');
-  const subtotal = !conMonto.length ? '' : ref ? dolares(prevUsd + prevArs / ref) : (prevArs ? '' : dolares(prevUsd));
+  const subtotal = !conMonto.length && !iol ? '' : ref ? dolares(prevUsd + prevArs / ref) : (prevArs ? '' : dolares(prevUsd));
 
   return avisoConexion() + `
   <section class="bloque ahorro-total">
@@ -759,7 +793,9 @@ function vistaAhorro() {
   ${meta}
   <section class="bloque">
     <h2>Lo que ya tenían <span class="total">${subtotal}</span></h2>
-    <p class="ayuda">Dólares, CEDEARs, acciones, plazo fijo. Actualizá los valores cada tanto, porque las inversiones cambian de precio. Tocá US$ o $ para cambiar la moneda.</p>
+    ${data.iol
+      ? `${htmlIol()}<p class="ayuda">Lo de IOL se actualiza solo todos los días. Abajo podés sumar lo que tengan fuera de IOL, como dólares en efectivo; tocá US$ o $ para cambiar la moneda.</p>`
+      : '<p class="ayuda">Dólares, CEDEARs, acciones, plazo fijo. Actualizá los valores cada tanto, porque las inversiones cambian de precio. Tocá US$ o $ para cambiar la moneda.</p>'}
     ${scriptViejo
       ? '<p class="falta">Para cargar esto hay que actualizar el script de la planilla (Code.gs) a la versión nueva.</p>'
       : `<ul class="ahorros">${filasA}</ul>
@@ -978,6 +1014,12 @@ document.addEventListener('click', e => {
       render();
       break;
     }
+    case 'actualizarIOL':
+      ui.iolActualizando = true;
+      encolar({ t: 'iol' });
+      programarSync(0);
+      render();
+      break;
     case 'addAhorro': {
       const id = uid();
       encolar({ t: 'ahorro', d: { id, nombre: '', moneda: 'USD', monto: null, mes: mesActual() } });
